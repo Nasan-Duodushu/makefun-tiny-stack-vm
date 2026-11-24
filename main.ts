@@ -21,13 +21,15 @@ const SHAPE: Record<number, [number, number, number]> = {
   0x53: [0, 1, 0],
 };
 
-function execute(prog: Uint8Array, inp: Uint8Array): { bytes: number[]; code: number } {
+function execute(prog: Uint8Array, inp: Uint8Array): { bytes: Uint8Array; code: number } {
   const stack = new Int32Array(256);
   const calls = new Int32Array(64);
   const mem = new Int32Array(256);
-  const bytes: number[] = [];
+  // Output goes into a fixed buffer sized at the ISA's cap: no growth, no copies.
+  const buf = new Uint8Array(65_536);
+  let olen = 0;
   let sp = 0, csp = 0, pc = 0, inAt = 0, steps = 0;
-  const end = (code: number) => ({ bytes, code });
+  const end = (code: number) => ({ bytes: buf.slice(0, olen), code });
 
   for (;;) {
     // The ISA's step order: step limit, pc range, opcode known, immediate fits.
@@ -93,13 +95,13 @@ function execute(prog: Uint8Array, inp: Uint8Array): { bytes: number[]; code: nu
     }
     if (op === 0x50) { // PRINT in decimal
       const text = String(stack[--sp]);
-      if (bytes.length + text.length > 65_536) return end(11);
-      for (let i = 0; i < text.length; i++) bytes.push(text.charCodeAt(i));
+      if (olen + text.length > 65_536) return end(11);
+      for (let i = 0; i < text.length; i++) buf[olen++] = text.charCodeAt(i);
       continue;
     }
     if (op === 0x51) { // PUTC, one byte
-      if (bytes.length + 1 > 65_536) return end(11);
-      bytes.push(stack[--sp] & 255);
+      if (olen + 1 > 65_536) return end(11);
+      buf[olen++] = stack[--sp] & 255;
       continue;
     }
     if (op === 0x03) { sp -= 1; continue; } // POP
@@ -149,6 +151,6 @@ for (const id of readdirSync(inputDir).sort()) {
   const inp = new Uint8Array(readFileSync(join(inputDir, id, 'input.bin')));
   const result = execute(prog, inp);
   mkdirSync(join(outputDir, id), { recursive: true });
-  writeFileSync(join(outputDir, id, 'stdout.bin'), Uint8Array.from(result.bytes));
+  writeFileSync(join(outputDir, id, 'stdout.bin'), result.bytes);
   writeFileSync(join(outputDir, id, 'exit.txt'), `${result.code}\n`);
 }
